@@ -309,8 +309,8 @@ static inline void cake_update_flowkeys(struct flow_keys *keys, const struct sk_
 			break;
 		case htons(ETH_P_IPV6):
 #if KERNEL_VERSION(4, 2, 0) > LINUX_VERSION_CODE
-			keys->src = (__force __be32)ipv6_addr_hash(&tuple->src.u3.in6)
-			keys->dst = (__force __be32)ipv6_addr_hash(&tuple->dst.u3.in6)
+			keys->src = (__force __be32)ipv6_addr_hash(&tuple->src.u3.in6);
+			keys->dst = (__force __be32)ipv6_addr_hash(&tuple->dst.u3.in6);
 #else
 			keys->addrs.v6addrs.src = tuple->src.u3.in6;
 			keys->addrs.v6addrs.dst = tuple->dst.u3.in6;
