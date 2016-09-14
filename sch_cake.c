@@ -59,6 +59,7 @@
 #include "cobalt.c"
 
 #if defined(CONFIG_NF_CONNTRACK) || defined(CONFIG_NF_CONNTRACK_MODULE)
+#include <net/netfilter/nf_conntrack_core.h>
 #include <net/netfilter/nf_conntrack.h>
 #endif
 
@@ -285,17 +286,46 @@ enum {
 static inline void cake_update_flowkeys(struct flow_keys *keys, const struct sk_buff *skb, int nat_mode)
 {
 	enum ip_conntrack_info ctinfo;
-	const struct nf_conn *ct;
+	int proto;
+	bool reverse = false;
+
+	struct nf_conn *ct;
 	const struct nf_conntrack_tuple *tuple;
 
 	if (nat_mode == CAKE_NAT_NONE)
 		return;
 
-	ct = nf_ct_get(skb, &ctinfo);
-	if (ct == NULL)
-		return;
+	switch (tc_skb_protocol(skb)) {
+		case htons(ETH_P_IP):
+			proto = NFPROTO_IPV4;
+			break;
+		case htons(ETH_P_IPV6):
+			proto = NFPROTO_IPV6;
+			break;
+		default:
+			return;
+	}
 
-	tuple = &ct->tuplehash[CTINFO2DIR(ctinfo)].tuple;
+	ct = nf_ct_get(skb, &ctinfo);
+	if (ct != NULL) {
+		tuple = nf_ct_tuple(ct, CTINFO2DIR(ctinfo));
+	} else {
+		const struct nf_conntrack_tuple_hash *hash;
+		struct nf_conntrack_tuple srctuple;
+
+		if (! nf_ct_get_tuplepr(skb, skb_network_offset(skb),
+				proto, dev_net(skb->dev), &srctuple))
+			return;
+
+		hash = nf_conntrack_find_get(dev_net(skb->dev),
+				&nf_ct_zone_dflt, &srctuple);
+		if (hash == NULL)
+			return;
+
+		reverse = true;
+		ct = nf_ct_tuplehash_to_ctrack(hash);
+		tuple = nf_ct_tuple(ct, !hash->tuple.dst.dir);
+	}
 
 	switch(tc_skb_protocol(skb)) {
 		case htons(ETH_P_IP):
@@ -316,8 +346,6 @@ static inline void cake_update_flowkeys(struct flow_keys *keys, const struct sk_
 			keys->addrs.v6addrs.dst = tuple->dst.u3.in6;
 #endif
 			break;
-		default:
-			return;
 	}
 	if (keys->ports.ports) {
 #if KERNEL_VERSION(4, 2, 0) > LINUX_VERSION_CODE
@@ -328,10 +356,13 @@ static inline void cake_update_flowkeys(struct flow_keys *keys, const struct sk_
 		keys->ports.dst = tuple->dst.u.all;
 #endif
 	}
+	if (reverse)
+		nf_ct_put(ct);
+	return;
 }
 
 #else
-static inline cake_update_flowkeys(struct flow_keys *keys, const sk_buff *skb, int nat_mode)
+static inline void cake_update_flowkeys(struct flow_keys *keys, const sk_buff *skb, int nat_mode)
 {
 	/* There is nothing we can do here without CONNTRACK */
 	return;
@@ -346,6 +377,7 @@ cake_hash(struct cake_tin_data *q, const struct sk_buff *skb, int flow_mode)
 #else
 	struct flow_keys keys, host_keys;
 #endif
+
 	u32 flow_hash=0, srchost_hash, dsthost_hash;
 	u16 reduced_hash, srchost_idx, dsthost_idx;
 
@@ -354,6 +386,7 @@ cake_hash(struct cake_tin_data *q, const struct sk_buff *skb, int flow_mode)
 
 #if KERNEL_VERSION(4, 2, 0) > LINUX_VERSION_CODE
 	skb_flow_dissect(skb, &keys);
+
 	cake_update_flowkeys(&keys, skb, CAKE_NAT_FULL);
 
 	srchost_hash = jhash_1word(
