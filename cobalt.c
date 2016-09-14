@@ -215,15 +215,7 @@ bool cobalt_should_drop(struct cobalt_vars *vars,
 	if(over_target) {
 		if(!vars->dropping) {
 			vars->dropping = true;
-<<<<<<< HEAD
-<<<<<<< HEAD
-			vars->drop_next = now + p->interval;
-=======
 			vars->drop_next = cobalt_control_law(now, p->interval, vars->rec_inv_sqrt);
->>>>>>> eafae83... A better implementation of accelerated restart.
-=======
-			vars->drop_next = cobalt_control_law(vars->drop_next, p->interval, vars->rec_inv_sqrt);
->>>>>>> 9d2f4fe... Make Codel reactivation delay equal to signalling frequency, not base interval.
 		}
 		if(!vars->count)
 			vars->count = 1;
